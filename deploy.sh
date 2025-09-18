@@ -111,3 +111,5 @@ echo "2. Update purchase URL to your Gumroad store"
 echo "3. Test with demo license keys"
 echo ""
 echo "✅ Your license server is ready to deploy!"
+
+

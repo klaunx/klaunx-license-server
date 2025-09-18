@@ -161,3 +161,5 @@ NSWorkspace.shared.open(URL(string: "https://your-gumroad.com/l/klaunx")!)
 - **Total**: ~$5-10/month for thousands of users
 
 Much cheaper than App Store infrastructure!
+
+
