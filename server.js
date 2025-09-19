@@ -39,6 +39,20 @@ db.serialize(() => {
         )
     `);
     
+    // Usage tracking table
+    db.run(`
+        CREATE TABLE IF NOT EXISTS usage_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            license_key TEXT NOT NULL,
+            device_id TEXT NOT NULL,
+            request_type TEXT NOT NULL,
+            tokens_used INTEGER DEFAULT 0,
+            cost_usd DECIMAL(10,6) DEFAULT 0,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (license_key) REFERENCES licenses(key)
+        )
+    `);
+    
     // Insert demo licenses
     const demoLicenses = [
         ['KLAUNX-LIFETIME-DEMO01-ABCDEF', 'LIFETIME', 'demo@klaunx.com', null],
@@ -148,6 +162,8 @@ app.post('/api/v1/analyze', authenticateJWT, async (req, res) => {
     }
 
     const body = req.body;
+    const startTime = Date.now();
+    
     try {
         const fetch = (await import('node-fetch')).default;
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -159,11 +175,119 @@ app.post('/api/v1/analyze', authenticateJWT, async (req, res) => {
             body: JSON.stringify(body),
         });
         const data = await response.json();
+        
+        // Track usage after successful request
+        if (response.ok && data.usage) {
+            const tokensUsed = data.usage.total_tokens || 0;
+            const estimatedCost = calculateCost(body.model || 'gpt-4o-mini', tokensUsed);
+            
+            // Log usage to database
+            db.run(`
+                INSERT INTO usage_logs (license_key, device_id, request_type, tokens_used, cost_usd)
+                VALUES (?, ?, ?, ?, ?)
+            `, [req.user.licenseKey, req.user.deviceId, 'ai_analysis', tokensUsed, estimatedCost], (err) => {
+                if (err) console.error('❌ Failed to log usage:', err);
+                else console.log(`📊 Logged usage: ${req.user.licenseKey} used ${tokensUsed} tokens ($${estimatedCost.toFixed(4)})`);
+            });
+        }
+        
         return res.status(response.status).json(data);
     } catch (e) {
         return res.status(500).json({ error: { message: 'proxy_failed', details: String(e) } });
     }
 });
+
+// Usage analytics endpoint
+app.get('/api/usage/:license_key', async (req, res) => {
+    const { license_key } = req.params;
+    
+    try {
+        await rateLimiter.consume(req.ip);
+    } catch {
+        return res.status(429).json({ error: 'rate_limit' });
+    }
+    
+    // Get usage stats for the license
+    db.all(`
+        SELECT 
+            COUNT(*) as total_requests,
+            SUM(tokens_used) as total_tokens,
+            SUM(cost_usd) as total_cost,
+            DATE(timestamp) as date,
+            COUNT(*) as daily_requests
+        FROM usage_logs 
+        WHERE license_key = ? 
+        AND timestamp >= datetime('now', '-30 days')
+        GROUP BY DATE(timestamp)
+        ORDER BY date DESC
+    `, [license_key], (err, rows) => {
+        if (err) {
+            return res.status(500).json({ error: 'database_error' });
+        }
+        
+        // Get overall stats
+        db.get(`
+            SELECT 
+                COUNT(*) as total_requests,
+                SUM(tokens_used) as total_tokens,
+                SUM(cost_usd) as total_cost
+            FROM usage_logs 
+            WHERE license_key = ?
+        `, [license_key], (err, totals) => {
+            if (err) {
+                return res.status(500).json({ error: 'database_error' });
+            }
+            
+            res.json({
+                license_key,
+                overall: totals || { total_requests: 0, total_tokens: 0, total_cost: 0 },
+                daily_usage: rows || []
+            });
+        });
+    });
+});
+
+// Admin endpoint to see all usage
+app.get('/api/admin/usage', async (req, res) => {
+    const adminKey = req.headers['x-admin-key'];
+    if (adminKey !== process.env.ADMIN_KEY) {
+        return res.status(401).json({ error: 'unauthorized' });
+    }
+    
+    db.all(`
+        SELECT 
+            l.key,
+            l.type,
+            l.email,
+            COUNT(u.id) as total_requests,
+            SUM(u.tokens_used) as total_tokens,
+            SUM(u.cost_usd) as total_cost,
+            MAX(u.timestamp) as last_used
+        FROM licenses l
+        LEFT JOIN usage_logs u ON l.key = u.license_key
+        GROUP BY l.key
+        ORDER BY total_requests DESC
+    `, [], (err, rows) => {
+        if (err) {
+            return res.status(500).json({ error: 'database_error' });
+        }
+        res.json({ licenses: rows || [] });
+    });
+});
+
+// Cost calculation helper
+function calculateCost(model, tokens) {
+    const pricing = {
+        'gpt-4o': { input: 0.0025, output: 0.01 }, // per 1K tokens
+        'gpt-4o-mini': { input: 0.000150, output: 0.0006 },
+        'gpt-4': { input: 0.03, output: 0.06 },
+        'gpt-3.5-turbo': { input: 0.0015, output: 0.002 }
+    };
+    
+    const modelPricing = pricing[model] || pricing['gpt-4o-mini'];
+    // Simplified: assume 50/50 input/output split
+    return (tokens / 1000) * ((modelPricing.input + modelPricing.output) / 2);
+}
 
 app.listen(PORT, () => {
     console.log(`🚀 Klaunx AI License Server running on port ${PORT}`);
