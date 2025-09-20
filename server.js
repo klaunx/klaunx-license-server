@@ -15,6 +15,9 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+// Serve static files for admin dashboard
+app.use(express.static('public'));
+
 // Rate limiting
 const rateLimiter = new RateLimiterMemory({
     keyPrefix: 'license_validation',
@@ -259,6 +262,9 @@ app.get('/api/admin/usage', async (req, res) => {
             l.key,
             l.type,
             l.email,
+            l.created_at,
+            l.expires_at,
+            l.active,
             COUNT(u.id) as total_requests,
             SUM(u.tokens_used) as total_tokens,
             SUM(u.cost_usd) as total_cost,
@@ -271,8 +277,85 @@ app.get('/api/admin/usage', async (req, res) => {
         if (err) {
             return res.status(500).json({ error: 'database_error' });
         }
-        res.json({ licenses: rows || [] });
+        res.json({ 
+            licenses: rows || [],
+            server_stats: {
+                uptime: process.uptime(),
+                memory: process.memoryUsage(),
+                timestamp: new Date().toISOString()
+            }
+        });
     });
+});
+
+// Admin endpoint for daily analytics
+app.get('/api/admin/analytics', async (req, res) => {
+    const adminKey = req.headers['x-admin-key'];
+    if (adminKey !== process.env.ADMIN_KEY) {
+        return res.status(401).json({ error: 'unauthorized' });
+    }
+    
+    db.all(`
+        SELECT 
+            DATE(timestamp) as date,
+            COUNT(*) as requests,
+            SUM(tokens_used) as tokens,
+            SUM(cost_usd) as cost,
+            COUNT(DISTINCT license_key) as active_users
+        FROM usage_logs 
+        WHERE timestamp >= datetime('now', '-30 days')
+        GROUP BY DATE(timestamp)
+        ORDER BY date DESC
+    `, [], (err, rows) => {
+        if (err) {
+            return res.status(500).json({ error: 'database_error' });
+        }
+        res.json({ daily_analytics: rows || [] });
+    });
+});
+
+// Admin endpoint to manage licenses
+app.post('/api/admin/license/:action', async (req, res) => {
+    const adminKey = req.headers['x-admin-key'];
+    if (adminKey !== process.env.ADMIN_KEY) {
+        return res.status(401).json({ error: 'unauthorized' });
+    }
+    
+    const { action } = req.params;
+    const { license_key, type, email, expires_at } = req.body;
+    
+    switch (action) {
+        case 'create':
+            db.run('INSERT INTO licenses (key, type, email, expires_at) VALUES (?, ?, ?, ?)', 
+                [license_key, type, email, expires_at], function(err) {
+                if (err) {
+                    return res.status(400).json({ error: 'License already exists or invalid data' });
+                }
+                res.json({ success: true, id: this.lastID });
+            });
+            break;
+            
+        case 'deactivate':
+            db.run('UPDATE licenses SET active = 0 WHERE key = ?', [license_key], function(err) {
+                if (err) {
+                    return res.status(500).json({ error: 'database_error' });
+                }
+                res.json({ success: true, changes: this.changes });
+            });
+            break;
+            
+        case 'activate':
+            db.run('UPDATE licenses SET active = 1 WHERE key = ?', [license_key], function(err) {
+                if (err) {
+                    return res.status(500).json({ error: 'database_error' });
+                }
+                res.json({ success: true, changes: this.changes });
+            });
+            break;
+            
+        default:
+            res.status(400).json({ error: 'Invalid action' });
+    }
 });
 
 // Cost calculation helper
