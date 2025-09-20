@@ -3,6 +3,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const sqlite3 = require('sqlite3').verbose();
 const crypto = require('crypto');
+const path = require('path');
 const { RateLimiterMemory } = require('rate-limiter-flexible');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
@@ -20,7 +21,7 @@ app.use(express.static('public'));
 
 // Root route to serve dashboard
 app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/public/index.html');
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Rate limiting
