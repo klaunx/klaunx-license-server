@@ -185,27 +185,33 @@ app.get('/admin', (req, res) => {
         
         function login() {
             adminKey = document.getElementById('admin-key').value;
+            console.log('Login attempt with key:', adminKey);
+            
             if (!adminKey) {
                 showError('Please enter admin password');
                 return;
             }
             
+            console.log('Making fetch request...');
             fetch('/api/admin/usage', {
                 headers: { 'x-admin-key': adminKey }
             })
             .then(response => {
+                console.log('Response status:', response.status);
                 if (response.status === 401) {
-                    throw new Error('Invalid admin password');
+                    throw new Error('Invalid admin password - check ADMIN_KEY environment variable');
                 }
                 return response.json();
             })
             .then(data => {
+                console.log('Login successful, showing dashboard');
                 document.getElementById('auth-card').classList.add('hidden');
                 document.getElementById('dashboard-content').classList.remove('hidden');
                 document.getElementById('refresh-btn').classList.remove('hidden');
                 updateDashboard(data);
             })
             .catch(error => {
+                console.error('Login error:', error);
                 showError(error.message);
             });
         }
