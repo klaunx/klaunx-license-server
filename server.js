@@ -21,7 +21,197 @@ app.use(express.static('public'));
 
 // Root route to serve dashboard
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    res.send(`
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Klaunx AI - Admin Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-radius: 20px; padding: 30px; margin-bottom: 30px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1); text-align: center; }
+        .header h1 { font-size: 2.5em; background: linear-gradient(135deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px; }
+        .auth-section { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-radius: 20px; padding: 40px; text-align: center; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1); }
+        .auth-section input { width: 300px; padding: 15px; border: 2px solid #e1e5e9; border-radius: 10px; font-size: 16px; margin: 10px; }
+        .auth-section button { background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; cursor: pointer; margin: 10px; }
+        .dashboard { display: none; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .stat-card { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-radius: 15px; padding: 25px; text-align: center; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); }
+        .stat-number { font-size: 2.5em; font-weight: bold; background: linear-gradient(135deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px; }
+        .stat-label { color: #666; font-size: 1.1em; }
+        .users-table { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-radius: 20px; padding: 30px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1); overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 15px; text-align: left; border-bottom: 1px solid #e1e5e9; }
+        th { background: linear-gradient(135deg, #667eea, #764ba2); color: white; font-weight: 600; }
+        .license-type { padding: 5px 10px; border-radius: 20px; font-size: 0.9em; font-weight: bold; }
+        .license-lifetime { background: #e8f5e8; color: #2d7d32; }
+        .license-yearly { background: #fff3e0; color: #f57c00; }
+        .license-monthly { background: #e3f2fd; color: #1976d2; }
+        .error { background: #ffebee; color: #c62828; padding: 15px; border-radius: 10px; margin: 20px 0; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Klaunx AI Admin Dashboard</h1>
+            <p>Monitor user activity, track usage, and manage licenses</p>
+        </div>
+        
+        <div id="auth-section" class="auth-section">
+            <h2>🔐 Admin Authentication</h2>
+            <div>
+                <input type="password" id="admin-key" placeholder="Enter Admin Key" />
+                <br>
+                <button onclick="authenticate()">Access Dashboard</button>
+            </div>
+            <div id="auth-error" class="error" style="display: none;"></div>
+        </div>
+        
+        <div id="dashboard" class="dashboard">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number" id="total-users">-</div>
+                    <div class="stat-label">Total Users</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="total-requests">-</div>
+                    <div class="stat-label">Total Requests</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="total-tokens">-</div>
+                    <div class="stat-label">Tokens Used</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="total-cost">-</div>
+                    <div class="stat-label">Total Cost</div>
+                </div>
+            </div>
+            
+            <div class="users-table">
+                <h3>👥 User Management</h3>
+                <table id="users-table">
+                    <thead>
+                        <tr>
+                            <th>License Key</th>
+                            <th>Type</th>
+                            <th>Email</th>
+                            <th>Requests</th>
+                            <th>Tokens</th>
+                            <th>Cost</th>
+                            <th>Last Used</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-tbody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let adminKey = '';
+        
+        function authenticate() {
+            adminKey = document.getElementById('admin-key').value;
+            if (!adminKey) {
+                showError('Please enter admin key');
+                return;
+            }
+            
+            fetch('/api/admin/usage', {
+                headers: { 'x-admin-key': adminKey }
+            })
+            .then(response => {
+                if (response.status === 401) {
+                    throw new Error('Invalid admin key');
+                }
+                return response.json();
+            })
+            .then(data => {
+                document.getElementById('auth-section').style.display = 'none';
+                document.getElementById('dashboard').style.display = 'block';
+                loadDashboard();
+            })
+            .catch(error => {
+                showError(error.message);
+            });
+        }
+        
+        function showError(message) {
+            const errorEl = document.getElementById('auth-error');
+            errorEl.textContent = message;
+            errorEl.style.display = 'block';
+            setTimeout(() => errorEl.style.display = 'none', 3000);
+        }
+        
+        async function loadDashboard() {
+            try {
+                const response = await fetch('/api/admin/usage', {
+                    headers: { 'x-admin-key': adminKey }
+                });
+                const data = await response.json();
+                
+                updateStats(data.licenses);
+                updateUsersTable(data.licenses);
+            } catch (error) {
+                console.error('Failed to load dashboard:', error);
+            }
+        }
+        
+        function updateStats(licenses) {
+            const totalUsers = licenses.length;
+            const totalRequests = licenses.reduce((sum, l) => sum + (l.total_requests || 0), 0);
+            const totalTokens = licenses.reduce((sum, l) => sum + (l.total_tokens || 0), 0);
+            const totalCost = licenses.reduce((sum, l) => sum + (l.total_cost || 0), 0);
+            
+            document.getElementById('total-users').textContent = totalUsers;
+            document.getElementById('total-requests').textContent = totalRequests.toLocaleString();
+            document.getElementById('total-tokens').textContent = totalTokens.toLocaleString();
+            document.getElementById('total-cost').textContent = '$' + totalCost.toFixed(2);
+        }
+        
+        function updateUsersTable(licenses) {
+            const tbody = document.getElementById('users-tbody');
+            tbody.innerHTML = '';
+            
+            licenses.forEach(license => {
+                const row = document.createElement('tr');
+                const lastUsed = license.last_used ? 
+                    new Date(license.last_used).toLocaleDateString() : 'Never';
+                
+                row.innerHTML = \`
+                    <td><code>\${license.key.substring(0, 20)}...</code></td>
+                    <td><span class="license-type license-\${license.type.toLowerCase()}">\${license.type}</span></td>
+                    <td>\${license.email || 'N/A'}</td>
+                    <td>\${license.total_requests || 0}</td>
+                    <td>\${(license.total_tokens || 0).toLocaleString()}</td>
+                    <td>$\${(license.total_cost || 0).toFixed(4)}</td>
+                    <td>\${lastUsed}</td>
+                \`;
+                tbody.appendChild(row);
+            });
+        }
+        
+        document.getElementById('admin-key').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                authenticate();
+            }
+        });
+        
+        // Auto-refresh every 30 seconds
+        setInterval(() => {
+            if (adminKey && document.getElementById('dashboard').style.display !== 'none') {
+                loadDashboard();
+            }
+        }, 30000);
+    </script>
+</body>
+</html>
+    `);
 });
 
 // Rate limiting
