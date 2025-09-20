@@ -82,14 +82,199 @@ app.get('/', (req, res) => {
 
 // Admin dashboard route
 app.get('/admin', (req, res) => {
-    res.json({
-        message: "Admin dashboard API endpoint",
-        instructions: "Add ADMIN_KEY environment variable to access admin features",
-        endpoints: {
-            usage: "GET /api/admin/usage",
-            analytics: "GET /api/admin/analytics"
+    res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Klaunx AI - Admin Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: linear-gradient(135deg, #667eea, #764ba2); min-height: 100vh; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .card { background: white; border-radius: 15px; padding: 30px; margin: 20px 0; box-shadow: 0 15px 35px rgba(0,0,0,0.1); }
+        .header { text-align: center; color: white; margin-bottom: 30px; }
+        .header h1 { font-size: 3em; margin-bottom: 10px; text-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+        .header p { font-size: 1.2em; opacity: 0.9; }
+        input[type="password"] { width: 100%; padding: 15px; border: 2px solid #e1e5e9; border-radius: 10px; font-size: 16px; margin: 15px 0; transition: border-color 0.3s; }
+        input[type="password"]:focus { outline: none; border-color: #667eea; }
+        button { background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; padding: 15px 30px; border-radius: 10px; font-size: 16px; cursor: pointer; transition: transform 0.2s; }
+        button:hover { transform: translateY(-2px); }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin: 25px 0; }
+        .stat { background: #f8f9fa; padding: 25px; border-radius: 10px; text-align: center; }
+        .stat-number { font-size: 2.5em; font-weight: bold; color: #667eea; margin-bottom: 5px; }
+        .stat-label { color: #666; font-size: 1.1em; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 15px; text-align: left; border-bottom: 1px solid #e1e5e9; }
+        th { background: linear-gradient(135deg, #667eea, #764ba2); color: white; font-weight: 600; }
+        tr:hover { background: rgba(102, 126, 234, 0.05); }
+        .license-badge { padding: 6px 12px; border-radius: 20px; font-size: 0.85em; font-weight: bold; }
+        .lifetime { background: #e8f5e8; color: #2d7d32; }
+        .yearly { background: #fff3e0; color: #f57c00; }
+        .monthly { background: #e3f2fd; color: #1976d2; }
+        .error { background: #ffebee; color: #c62828; padding: 15px; border-radius: 10px; margin: 15px 0; text-align: center; }
+        .hidden { display: none; }
+        .refresh-btn { position: fixed; bottom: 30px; right: 30px; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; padding: 15px; border-radius: 50%; width: 60px; height: 60px; cursor: pointer; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Klaunx AI</h1>
+            <p>Admin Dashboard - Monitor & Manage</p>
+        </div>
+        
+        <div id="auth-card" class="card">
+            <h2>🔐 Admin Authentication</h2>
+            <p style="margin: 15px 0; color: #666;">Enter your admin password to access the dashboard</p>
+            <input type="password" id="admin-key" placeholder="Enter Admin Password" />
+            <button onclick="login()">Access Dashboard</button>
+            <div id="error-msg" class="error hidden"></div>
+        </div>
+        
+        <div id="dashboard-content" class="hidden">
+            <div class="card">
+                <h3>📊 Usage Overview</h3>
+                <div class="stats">
+                    <div class="stat">
+                        <div class="stat-number" id="total-users">-</div>
+                        <div class="stat-label">Total Users</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-number" id="total-requests">-</div>
+                        <div class="stat-label">API Requests</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-number" id="total-tokens">-</div>
+                        <div class="stat-label">Tokens Used</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-number" id="total-cost">-</div>
+                        <div class="stat-label">Total Cost</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3>👥 License Management</h3>
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>License Key</th>
+                                <th>Type</th>
+                                <th>Email</th>
+                                <th>Requests</th>
+                                <th>Tokens</th>
+                                <th>Cost</th>
+                                <th>Last Used</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <button class="refresh-btn hidden" id="refresh-btn" onclick="refreshData()" title="Refresh Data">🔄</button>
+    
+    <script>
+        let adminKey = '';
+        
+        function login() {
+            adminKey = document.getElementById('admin-key').value;
+            if (!adminKey) {
+                showError('Please enter admin password');
+                return;
+            }
+            
+            fetch('/api/admin/usage', {
+                headers: { 'x-admin-key': adminKey }
+            })
+            .then(response => {
+                if (response.status === 401) {
+                    throw new Error('Invalid admin password');
+                }
+                return response.json();
+            })
+            .then(data => {
+                document.getElementById('auth-card').classList.add('hidden');
+                document.getElementById('dashboard-content').classList.remove('hidden');
+                document.getElementById('refresh-btn').classList.remove('hidden');
+                updateDashboard(data);
+            })
+            .catch(error => {
+                showError(error.message);
+            });
         }
-    });
+        
+        function showError(message) {
+            const errorEl = document.getElementById('error-msg');
+            errorEl.textContent = message;
+            errorEl.classList.remove('hidden');
+            setTimeout(() => errorEl.classList.add('hidden'), 4000);
+        }
+        
+        function updateDashboard(data) {
+            const licenses = data.licenses || [];
+            
+            // Update stats
+            const totalUsers = licenses.length;
+            const totalRequests = licenses.reduce((sum, l) => sum + (l.total_requests || 0), 0);
+            const totalTokens = licenses.reduce((sum, l) => sum + (l.total_tokens || 0), 0);
+            const totalCost = licenses.reduce((sum, l) => sum + (l.total_cost || 0), 0);
+            
+            document.getElementById('total-users').textContent = totalUsers;
+            document.getElementById('total-requests').textContent = totalRequests.toLocaleString();
+            document.getElementById('total-tokens').textContent = totalTokens.toLocaleString();
+            document.getElementById('total-cost').textContent = '$' + totalCost.toFixed(2);
+            
+            // Update table
+            const tbody = document.getElementById('users-table');
+            tbody.innerHTML = '';
+            
+            licenses.forEach(license => {
+                const row = document.createElement('tr');
+                const lastUsed = license.last_used ? 
+                    new Date(license.last_used).toLocaleDateString() : 'Never';
+                
+                row.innerHTML = \`
+                    <td><code style="font-size: 0.9em;">\${license.key.substring(0, 25)}...</code></td>
+                    <td><span class="license-badge \${license.type.toLowerCase()}">\${license.type}</span></td>
+                    <td>\${license.email || 'N/A'}</td>
+                    <td>\${license.total_requests || 0}</td>
+                    <td>\${(license.total_tokens || 0).toLocaleString()}</td>
+                    <td>$\${(license.total_cost || 0).toFixed(4)}</td>
+                    <td>\${lastUsed}</td>
+                \`;
+                tbody.appendChild(row);
+            });
+        }
+        
+        function refreshData() {
+            if (adminKey) {
+                fetch('/api/admin/usage', {
+                    headers: { 'x-admin-key': adminKey }
+                })
+                .then(response => response.json())
+                .then(data => updateDashboard(data))
+                .catch(error => console.error('Refresh failed:', error));
+            }
+        }
+        
+        // Enter key to login
+        document.getElementById('admin-key').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') login();
+        });
+        
+        // Auto-refresh every 30 seconds
+        setInterval(refreshData, 30000);
+    </script>
+</body>
+</html>
+    `);
 });
 
 app.post('/api/validate-license', async (req, res) => {
