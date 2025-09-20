@@ -18,6 +18,11 @@ app.use(express.json({ limit: '10mb' }));
 // Serve static files for admin dashboard
 app.use(express.static('public'));
 
+// Root route to serve dashboard
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/public/index.html');
+});
+
 // Rate limiting
 const rateLimiter = new RateLimiterMemory({
     keyPrefix: 'license_validation',
